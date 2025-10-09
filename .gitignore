@@ -1,0 +1,19 @@
+# Ignore all source code files
+src/**/*.cpp
+src/**/*.hpp
+src/**/*.h
+
+# Allow these essential metadata files
+!src/*/CMakeLists.txt
+!src/*/package.xml
+
+# Ignore build outputs if any
+build/
+install/
+log/
+
+# OS/editor junk
+*.swp
+*.DS_Store
+.vscode/
+.idea/
