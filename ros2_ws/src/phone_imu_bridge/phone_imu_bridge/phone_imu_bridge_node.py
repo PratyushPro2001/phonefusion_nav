@@ -2,7 +2,7 @@
 
 import json
 import socket
-import time
+import math
 from typing import Any, Dict, Optional, Tuple
 
 import rclpy
@@ -10,7 +10,6 @@ from rclpy.node import Node
 
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import Quaternion
-from tf_transformations import quaternion_from_euler
 
 
 def _now_stamp(node: Node):
@@ -33,42 +32,34 @@ def _as_float(x) -> Optional[float]:
         return None
 
 
+def quat_from_euler(roll: float, pitch: float, yaw: float) -> Quaternion:
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+
+    q = Quaternion()
+    q.w = cr * cp * cy + sr * sp * sy
+    q.x = sr * cp * cy - cr * sp * sy
+    q.y = cr * sp * cy + sr * cp * sy
+    q.z = cr * cp * sy - sr * sp * cy
+    return q
+
+
 class PhoneImuBridge(Node):
-    """
-    UDP -> sensor_msgs/Imu publisher.
-
-    Accepted payloads (one UDP datagram):
-    1) JSON (recommended), any of these key styles:
-       - {"accel":{"x":..,"y":..,"z":..}, "gyro":{"x":..,"y":..,"z":..}, "yaw":..,"pitch":..,"roll":..}
-       - {"linear_acceleration":{"x":..,"y":..,"z":..}, "angular_velocity":{"x":..,"y":..,"z":..}}
-       - {"ax":..,"ay":..,"az":..,"gx":..,"gy":..,"gz":..}  (short keys)
-       - Optional quaternion:
-         {"quat":{"x":..,"y":..,"z":..,"w":..}} or {"q":{"x":..,"y":..,"z":..,"w":..}}
-
-    Units:
-    - accel expected in m/s^2 (default)
-    - gyro expected in rad/s (default)
-    Use params to scale if your phone app sends g or deg/s.
-    """
-
     def __init__(self):
         super().__init__('phone_imu_bridge')
 
-        # Parameters
         self.declare_parameter('bind_ip', '0.0.0.0')
         self.declare_parameter('port', 5555)
         self.declare_parameter('topic', '/imu/data')
         self.declare_parameter('frame_id', 'imu_link')
 
-        # Unit scaling
-        # If accel is in "g", set accel_scale = 9.80665
-        # If gyro is in "deg/s", set gyro_scale = 0.017453292519943295 (pi/180)
         self.declare_parameter('accel_scale', 1.0)
         self.declare_parameter('gyro_scale', 1.0)
 
-        # Optional axis mapping (simple and fast):
-        # Provide signs (+1/-1) and swaps to match ROS frame.
-        # Example: swap_xy=True to swap x/y.
         self.declare_parameter('swap_xy', False)
         self.declare_parameter('swap_xz', False)
         self.declare_parameter('swap_yz', False)
@@ -76,14 +67,13 @@ class PhoneImuBridge(Node):
         self.declare_parameter('flip_y', False)
         self.declare_parameter('flip_z', False)
 
-        # Orientation behavior
         self.declare_parameter('use_orientation_if_available', True)
         self.declare_parameter('orientation_from_rpy_if_available', True)
 
-        self.bind_ip = self.get_parameter('bind_ip').get_parameter_value().string_value
-        self.port = int(self.get_parameter('port').get_parameter_value().integer_value)
-        self.topic = self.get_parameter('topic').get_parameter_value().string_value
-        self.frame_id = self.get_parameter('frame_id').get_parameter_value().string_value
+        self.bind_ip = self.get_parameter('bind_ip').value
+        self.port = int(self.get_parameter('port').value)
+        self.topic = self.get_parameter('topic').value
+        self.frame_id = self.get_parameter('frame_id').value
 
         self.accel_scale = float(self.get_parameter('accel_scale').value)
         self.gyro_scale = float(self.get_parameter('gyro_scale').value)
@@ -98,19 +88,15 @@ class PhoneImuBridge(Node):
         self.use_orientation_if_available = bool(self.get_parameter('use_orientation_if_available').value)
         self.orientation_from_rpy_if_available = bool(self.get_parameter('orientation_from_rpy_if_available').value)
 
-        # Publisher
         self.pub = self.create_publisher(Imu, self.topic, 50)
 
-        # UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((self.bind_ip, self.port))
         self.sock.setblocking(False)
 
         self.get_logger().info(f'Listening UDP on {self.bind_ip}:{self.port} -> publishing {self.topic}')
-
-        # Poll timer (no threads)
-        self.create_timer(0.002, self.poll_socket)  # ~500 Hz max
+        self.create_timer(0.002, self.poll_socket)
 
     def _apply_axis_map(self, x: float, y: float, z: float) -> Tuple[float, float, float]:
         if self.swap_xy:
@@ -132,7 +118,6 @@ class PhoneImuBridge(Node):
             s = payload.decode('utf-8', errors='ignore').strip()
             if not s:
                 return None
-            # Allow trailing newlines or multiple JSON objects separated by newline: take last non-empty
             if '\n' in s:
                 parts = [p.strip() for p in s.splitlines() if p.strip()]
                 s = parts[-1] if parts else s
@@ -141,7 +126,6 @@ class PhoneImuBridge(Node):
             return None
 
     def _extract_vec3(self, d: Dict[str, Any], style_keys) -> Optional[Tuple[float, float, float]]:
-        # style_keys is list of possible dict paths for x,y,z
         for path in style_keys:
             sub = _get_nested(d, path)
             if isinstance(sub, dict):
@@ -180,7 +164,6 @@ class PhoneImuBridge(Node):
         if not self.orientation_from_rpy_if_available:
             return None
 
-        # Common keys: roll/pitch/yaw OR r/p/y OR (deg)
         roll = _as_float(d.get('roll', d.get('r', None)))
         pitch = _as_float(d.get('pitch', d.get('p', None)))
         yaw = _as_float(d.get('yaw', d.get('y', None)))
@@ -195,10 +178,7 @@ class PhoneImuBridge(Node):
         if roll is None or pitch is None or yaw is None:
             return None
 
-        qx, qy, qz, qw = quaternion_from_euler(roll, pitch, yaw)
-        q = Quaternion()
-        q.x, q.y, q.z, q.w = float(qx), float(qy), float(qz), float(qw)
-        return q
+        return quat_from_euler(roll, pitch, yaw)
 
     def poll_socket(self):
         while True:
@@ -214,23 +194,11 @@ class PhoneImuBridge(Node):
             if not isinstance(d, dict):
                 continue
 
-            # Accel
-            accel = self._extract_vec3(d, [
-                ('accel',),
-                ('linear_acceleration',),
-                ('linacc',),
-                ('a',),
-            ])
+            accel = self._extract_vec3(d, [('accel',), ('linear_acceleration',), ('linacc',), ('a',)])
             if accel is None:
                 accel = self._extract_short(d, 'ax', 'ay', 'az')
 
-            # Gyro
-            gyro = self._extract_vec3(d, [
-                ('gyro',),
-                ('angular_velocity',),
-                ('angvel',),
-                ('g',),
-            ])
+            gyro = self._extract_vec3(d, [('gyro',), ('angular_velocity',), ('angvel',), ('g',)])
             if gyro is None:
                 gyro = self._extract_short(d, 'gx', 'gy', 'gz')
 
@@ -240,7 +208,6 @@ class PhoneImuBridge(Node):
             ax, ay, az = accel
             gx, gy, gz = gyro
 
-            # Scale units
             ax *= self.accel_scale
             ay *= self.accel_scale
             az *= self.accel_scale
@@ -248,7 +215,6 @@ class PhoneImuBridge(Node):
             gy *= self.gyro_scale
             gz *= self.gyro_scale
 
-            # Axis mapping
             ax, ay, az = self._apply_axis_map(ax, ay, az)
             gx, gy, gz = self._apply_axis_map(gx, gy, gz)
 
@@ -264,14 +230,13 @@ class PhoneImuBridge(Node):
             imu.angular_velocity.y = float(gy)
             imu.angular_velocity.z = float(gz)
 
-            # Orientation (optional)
             q = self._extract_quat(d)
             if q is None:
                 q = self._extract_rpy_quat(d)
             if q is not None:
                 imu.orientation = q
             else:
-                imu.orientation.w = 1.0  # identity
+                imu.orientation.w = 1.0
 
             self.pub.publish(imu)
 

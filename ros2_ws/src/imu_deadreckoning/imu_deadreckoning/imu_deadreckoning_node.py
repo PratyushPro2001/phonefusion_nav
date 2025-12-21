@@ -3,11 +3,20 @@
 import rclpy
 from rclpy.node import Node
 import numpy as np
+import math
 
 from sensor_msgs.msg import Imu
 from nav_msgs.msg import Odometry, Path
-from geometry_msgs.msg import PoseStamped
-from tf_transformations import quaternion_from_euler
+from geometry_msgs.msg import PoseStamped, Quaternion
+
+
+def quat_from_yaw(yaw: float) -> Quaternion:
+    q = Quaternion()
+    q.w = math.cos(yaw * 0.5)
+    q.z = math.sin(yaw * 0.5)
+    q.x = 0.0
+    q.y = 0.0
+    return q
 
 
 class ImuDeadReckoning(Node):
@@ -21,12 +30,7 @@ class ImuDeadReckoning(Node):
         self.yaw = 0.0
         self.last_time = None
 
-        self.create_subscription(
-            Imu,
-            '/imu/data',
-            self.imu_callback,
-            10
-        )
+        self.create_subscription(Imu, '/imu/data', self.imu_callback, 10)
 
         self.odom_pub = self.create_publisher(Odometry, '/imu/odom', 10)
         self.path_pub = self.create_publisher(Path, '/imu/path', 10)
@@ -72,12 +76,7 @@ class ImuDeadReckoning(Node):
 
         odom.pose.pose.position.x = self.x
         odom.pose.pose.position.y = self.y
-
-        q = quaternion_from_euler(0.0, 0.0, self.yaw)
-        odom.pose.pose.orientation.x = q[0]
-        odom.pose.pose.orientation.y = q[1]
-        odom.pose.pose.orientation.z = q[2]
-        odom.pose.pose.orientation.w = q[3]
+        odom.pose.pose.orientation = quat_from_yaw(self.yaw)
 
         odom.twist.twist.linear.x = self.vx
         odom.twist.twist.linear.y = self.vy
@@ -90,6 +89,7 @@ class ImuDeadReckoning(Node):
         pose.header.frame_id = 'odom'
         pose.pose.position.x = self.x
         pose.pose.position.y = self.y
+        pose.pose.orientation = quat_from_yaw(self.yaw)
 
         self.path_msg.header.stamp = stamp
         self.path_msg.poses.append(pose)
