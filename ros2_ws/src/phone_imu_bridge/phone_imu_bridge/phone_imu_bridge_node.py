@@ -3,7 +3,7 @@
 import json
 import socket
 import math
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 
 import rclpy
 from rclpy.node import Node
@@ -16,15 +16,6 @@ def _now_stamp(node: Node):
     return node.get_clock().now().to_msg()
 
 
-def _get_nested(d: Dict[str, Any], keys) -> Optional[Any]:
-    cur = d
-    for k in keys:
-        if not isinstance(cur, dict) or k not in cur:
-            return None
-        cur = cur[k]
-    return cur
-
-
 def _as_float(x) -> Optional[float]:
     try:
         return float(x)
@@ -33,18 +24,30 @@ def _as_float(x) -> Optional[float]:
 
 
 def quat_from_euler(roll: float, pitch: float, yaw: float) -> Quaternion:
-    cr = math.cos(roll * 0.5)
-    sr = math.sin(roll * 0.5)
-    cp = math.cos(pitch * 0.5)
-    sp = math.sin(pitch * 0.5)
-    cy = math.cos(yaw * 0.5)
-    sy = math.sin(yaw * 0.5)
-
+    cr = math.cos(roll * 0.5); sr = math.sin(roll * 0.5)
+    cp = math.cos(pitch * 0.5); sp = math.sin(pitch * 0.5)
+    cy = math.cos(yaw * 0.5); sy = math.sin(yaw * 0.5)
     q = Quaternion()
     q.w = cr * cp * cy + sr * sp * sy
     q.x = sr * cp * cy - cr * sp * sy
     q.y = cr * sp * cy + sr * cp * sy
     q.z = cr * cp * sy - sr * sp * cy
+    return q
+
+
+def quat_from_android_rotation_vector(values: List[float]) -> Quaternion:
+    # Android rotation vector: [x, y, z, w] where w = cos(theta/2)
+    # Sometimes w is omitted; then w = sqrt(1 - x^2 - y^2 - z^2) (clamped).
+    x = float(values[0]) if len(values) > 0 else 0.0
+    y = float(values[1]) if len(values) > 1 else 0.0
+    z = float(values[2]) if len(values) > 2 else 0.0
+    if len(values) > 3:
+        w = float(values[3])
+    else:
+        t = 1.0 - (x*x + y*y + z*z)
+        w = math.sqrt(max(0.0, t))
+    q = Quaternion()
+    q.x, q.y, q.z, q.w = x, y, z, w
     return q
 
 
@@ -57,9 +60,11 @@ class PhoneImuBridge(Node):
         self.declare_parameter('topic', '/imu/data')
         self.declare_parameter('frame_id', 'imu_link')
 
-        self.declare_parameter('accel_scale', 1.0)
-        self.declare_parameter('gyro_scale', 1.0)
+        # Unit scaling (apply to accel/gyro only)
+        self.declare_parameter('accel_scale', 1.0)  # set 9.80665 if accel is in g
+        self.declare_parameter('gyro_scale', 1.0)   # set pi/180 if gyro is deg/s
 
+        # Axis mapping
         self.declare_parameter('swap_xy', False)
         self.declare_parameter('swap_xz', False)
         self.declare_parameter('swap_yz', False)
@@ -98,19 +103,18 @@ class PhoneImuBridge(Node):
         self.get_logger().info(f'Listening UDP on {self.bind_ip}:{self.port} -> publishing {self.topic}')
         self.create_timer(0.002, self.poll_socket)
 
+        # Latest sensor values (for SensaGram "type"+"values" streams)
+        self.last_accel: Optional[Tuple[float,float,float]] = None
+        self.last_gyro: Optional[Tuple[float,float,float]] = None
+        self.last_quat: Optional[Quaternion] = None
+
     def _apply_axis_map(self, x: float, y: float, z: float) -> Tuple[float, float, float]:
-        if self.swap_xy:
-            x, y = y, x
-        if self.swap_xz:
-            x, z = z, x
-        if self.swap_yz:
-            y, z = z, y
-        if self.flip_x:
-            x = -x
-        if self.flip_y:
-            y = -y
-        if self.flip_z:
-            z = -z
+        if self.swap_xy: x, y = y, x
+        if self.swap_xz: x, z = z, x
+        if self.swap_yz: y, z = z, y
+        if self.flip_x: x = -x
+        if self.flip_y: y = -y
+        if self.flip_z: z = -z
         return x, y, z
 
     def _parse_json(self, payload: bytes) -> Optional[Dict[str, Any]]:
@@ -125,60 +129,31 @@ class PhoneImuBridge(Node):
         except Exception:
             return None
 
-    def _extract_vec3(self, d: Dict[str, Any], style_keys) -> Optional[Tuple[float, float, float]]:
-        for path in style_keys:
-            sub = _get_nested(d, path)
-            if isinstance(sub, dict):
-                x = _as_float(sub.get('x', None))
-                y = _as_float(sub.get('y', None))
-                z = _as_float(sub.get('z', None))
-                if x is not None and y is not None and z is not None:
-                    return x, y, z
-        return None
+    def _publish_if_ready(self):
+        if self.last_accel is None or self.last_gyro is None:
+            return
 
-    def _extract_short(self, d: Dict[str, Any], kx, ky, kz) -> Optional[Tuple[float, float, float]]:
-        x = _as_float(d.get(kx, None))
-        y = _as_float(d.get(ky, None))
-        z = _as_float(d.get(kz, None))
-        if x is None or y is None or z is None:
-            return None
-        return x, y, z
+        ax, ay, az = self.last_accel
+        gx, gy, gz = self.last_gyro
 
-    def _extract_quat(self, d: Dict[str, Any]) -> Optional[Quaternion]:
-        if not self.use_orientation_if_available:
-            return None
-        for key in ('quat', 'q', 'quaternion', 'orientation'):
-            sub = d.get(key, None)
-            if isinstance(sub, dict):
-                qx = _as_float(sub.get('x', None))
-                qy = _as_float(sub.get('y', None))
-                qz = _as_float(sub.get('z', None))
-                qw = _as_float(sub.get('w', None))
-                if None not in (qx, qy, qz, qw):
-                    q = Quaternion()
-                    q.x, q.y, q.z, q.w = qx, qy, qz, qw
-                    return q
-        return None
+        imu = Imu()
+        imu.header.stamp = _now_stamp(self)
+        imu.header.frame_id = self.frame_id
 
-    def _extract_rpy_quat(self, d: Dict[str, Any]) -> Optional[Quaternion]:
-        if not self.orientation_from_rpy_if_available:
-            return None
+        imu.linear_acceleration.x = float(ax)
+        imu.linear_acceleration.y = float(ay)
+        imu.linear_acceleration.z = float(az)
 
-        roll = _as_float(d.get('roll', d.get('r', None)))
-        pitch = _as_float(d.get('pitch', d.get('p', None)))
-        yaw = _as_float(d.get('yaw', d.get('y', None)))
+        imu.angular_velocity.x = float(gx)
+        imu.angular_velocity.y = float(gy)
+        imu.angular_velocity.z = float(gz)
 
-        if roll is None or pitch is None or yaw is None:
-            rpy = d.get('rpy', None)
-            if isinstance(rpy, dict):
-                roll = _as_float(rpy.get('roll', None))
-                pitch = _as_float(rpy.get('pitch', None))
-                yaw = _as_float(rpy.get('yaw', None))
+        if self.use_orientation_if_available and self.last_quat is not None:
+            imu.orientation = self.last_quat
+        else:
+            imu.orientation.w = 1.0
 
-        if roll is None or pitch is None or yaw is None:
-            return None
-
-        return quat_from_euler(roll, pitch, yaw)
+        self.pub.publish(imu)
 
     def poll_socket(self):
         while True:
@@ -194,51 +169,44 @@ class PhoneImuBridge(Node):
             if not isinstance(d, dict):
                 continue
 
-            accel = self._extract_vec3(d, [('accel',), ('linear_acceleration',), ('linacc',), ('a',)])
-            if accel is None:
-                accel = self._extract_short(d, 'ax', 'ay', 'az')
+            # --- SensaGram format: {"timestamp":..., "values":[...], "type":"android.sensor.*"} ---
+            if 'type' in d and 'values' in d and isinstance(d['values'], list):
+                t = str(d.get('type', ''))
+                vals = d['values']
+                try:
+                    vals_f = [float(v) for v in vals]
+                except Exception:
+                    continue
 
-            gyro = self._extract_vec3(d, [('gyro',), ('angular_velocity',), ('angvel',), ('g',)])
-            if gyro is None:
-                gyro = self._extract_short(d, 'gx', 'gy', 'gz')
+                if t in ('android.sensor.accelerometer', 'android.sensor.linear_acceleration'):
+                    if len(vals_f) >= 3:
+                        ax, ay, az = vals_f[0], vals_f[1], vals_f[2]
+                        ax *= self.accel_scale; ay *= self.accel_scale; az *= self.accel_scale
+                        ax, ay, az = self._apply_axis_map(ax, ay, az)
+                        self.last_accel = (ax, ay, az)
+                        self._publish_if_ready()
+                    continue
 
-            if accel is None or gyro is None:
+                if t in ('android.sensor.gyroscope',):
+                    if len(vals_f) >= 3:
+                        gx, gy, gz = vals_f[0], vals_f[1], vals_f[2]
+                        gx *= self.gyro_scale; gy *= self.gyro_scale; gz *= self.gyro_scale
+                        gx, gy, gz = self._apply_axis_map(gx, gy, gz)
+                        self.last_gyro = (gx, gy, gz)
+                        self._publish_if_ready()
+                    continue
+
+                if t in ('android.sensor.game_rotation_vector', 'android.sensor.rotation_vector'):
+                    if self.use_orientation_if_available and len(vals_f) >= 3:
+                        self.last_quat = quat_from_android_rotation_vector(vals_f)
+                    continue
+
+                # unknown sensagram sensor type -> ignore
                 continue
 
-            ax, ay, az = accel
-            gx, gy, gz = gyro
-
-            ax *= self.accel_scale
-            ay *= self.accel_scale
-            az *= self.accel_scale
-            gx *= self.gyro_scale
-            gy *= self.gyro_scale
-            gz *= self.gyro_scale
-
-            ax, ay, az = self._apply_axis_map(ax, ay, az)
-            gx, gy, gz = self._apply_axis_map(gx, gy, gz)
-
-            imu = Imu()
-            imu.header.stamp = _now_stamp(self)
-            imu.header.frame_id = self.frame_id
-
-            imu.linear_acceleration.x = float(ax)
-            imu.linear_acceleration.y = float(ay)
-            imu.linear_acceleration.z = float(az)
-
-            imu.angular_velocity.x = float(gx)
-            imu.angular_velocity.y = float(gy)
-            imu.angular_velocity.z = float(gz)
-
-            q = self._extract_quat(d)
-            if q is None:
-                q = self._extract_rpy_quat(d)
-            if q is not None:
-                imu.orientation = q
-            else:
-                imu.orientation.w = 1.0
-
-            self.pub.publish(imu)
+            # --- Legacy (our old JSON styles) ---
+            # If you later send ax/ay/az + gx/gy/gz in one packet, we can add it back.
+            continue
 
 
 def main():
