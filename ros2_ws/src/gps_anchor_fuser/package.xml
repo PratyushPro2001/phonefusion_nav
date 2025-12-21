@@ -2,7 +2,7 @@
 <package format="3">
   <name>gps_anchor_fuser</name>
   <version>0.0.1</version>
-  <description>Simple GPS anchoring for IMU dead-reckoning odom (Phase 2.5)</description>
+  <description>Phase 2.5: Simple GPS anchoring for IMU dead reckoning</description>
 
   <maintainer email="you@odu.edu">Pratyush</maintainer>
   <license>Apache-2.0</license>

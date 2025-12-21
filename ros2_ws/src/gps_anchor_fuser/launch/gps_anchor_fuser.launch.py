@@ -13,9 +13,9 @@ def generate_launch_description():
                 'imu_odom_topic': '/imu/odom',
                 'out_odom_topic': '/fused/odom',
                 'out_path_topic': '/fused/path',
-                'gps_alpha': 0.02,
-                'max_hacc_m': 20.0,
-                'max_gps_step_m': 10.0,
+                'gps_alpha': 0.03,
+                'max_hacc_m': 15.0,
+                'max_gps_step_m': 12.0,
                 'frame_id': 'odom',
                 'child_frame_id': 'base_link',
             }]

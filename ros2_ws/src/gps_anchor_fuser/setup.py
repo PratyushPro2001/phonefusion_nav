@@ -14,7 +14,7 @@ setup(
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='pratyush',
-    description='Simple GPS anchoring for IMU dead-reckoning odom (Phase 2.5)',
+    description='Phase 2.5: Simple GPS anchoring for IMU dead reckoning',
     entry_points={
         'console_scripts': [
             'gps_anchor_node = gps_anchor_fuser.gps_anchor_node:main'
