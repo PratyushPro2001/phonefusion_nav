@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>phone_imu_bridge</name>
+  <version>0.0.1</version>
+  <description>UDP phone IMU to ROS2 Imu topic</description>
+
+  <maintainer email="you@odu.edu">Pratyush</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf_transformations</depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+</package>

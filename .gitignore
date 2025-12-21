@@ -1,19 +1,18 @@
-# Ignore all source code files
-src/**/*.cpp
-src/**/*.hpp
-src/**/*.h
+# ROS 2
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
 
-# Allow these essential metadata files
-!src/*/CMakeLists.txt
-!src/*/package.xml
+# Python
+__pycache__/
+*.pyc
 
-# Ignore build outputs if any
-build/
-install/
-log/
-
-# OS/editor junk
-*.swp
-*.DS_Store
+# Editors
 .vscode/
 .idea/
+
+# OS
+.DS_Store
+
+# Temp
+*.swp
