@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>phonefusion_nav_bringup</name>
+  <version>0.0.1</version>
+  <description>Bringup/launch package for PhoneFusion-Nav</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <exec_depend>turtlesim</exec_depend>
+  <exec_depend>phone_imu_bridge</exec_depend>
+  <exec_depend>phone_cam_bridge</exec_depend>
+  <exec_depend>apriltag_pose</exec_depend>
+  <exec_depend>ekf2d</exec_depend>
+  <exec_depend>tiny_planner</exec_depend>
+  <exec_depend>pure_pursuit_controller</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>phone_imu_bridge</exec_depend>
+  <exec_depend>imu_deadreckoning</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+</package>

@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(phone_cam_bridge)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+add_executable(cam_bridge src/main.cpp)
+ament_target_dependencies(cam_bridge rclcpp)
+install(TARGETS cam_bridge DESTINATION lib/${PROJECT_NAME})
+ament_package()

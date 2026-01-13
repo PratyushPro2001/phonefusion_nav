@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(apriltag_pose)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+add_executable(apriltag_node src/main.cpp)
+ament_target_dependencies(apriltag_node rclcpp)
+install(TARGETS apriltag_node DESTINATION lib/${PROJECT_NAME})
+ament_package()

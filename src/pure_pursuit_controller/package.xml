@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>pure_pursuit_controller</name>
+  <version>0.0.1</version>
+  <description>Stub pure pursuit controller</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+</package>

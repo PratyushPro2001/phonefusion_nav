@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(tiny_planner)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+add_executable(tiny_planner_node src/main.cpp)
+ament_target_dependencies(tiny_planner_node rclcpp)
+install(TARGETS tiny_planner_node DESTINATION lib/${PROJECT_NAME})
+ament_package()

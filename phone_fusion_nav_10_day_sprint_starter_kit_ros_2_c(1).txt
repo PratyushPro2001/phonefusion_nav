@@ -1,0 +1,711 @@
+# PhoneFusion‑Nav (ROS 2 Humble, C++)
+# 10‑Day Sprint Starter Kit
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Repo Layout (create exactly this)
+# ─────────────────────────────────────────────────────────────────────────────
+# phonefusion_nav/
+#   README.md
+#   LICENSE
+#   colcon.pkg
+#   CMakeLists.txt            # top-level for meta build convenience
+#   src/
+#     phone_imu_bridge/
+#     phone_cam_bridge/
+#     apriltag_pose/
+#     ekf2d/
+#     tiny_planner/
+#     pure_pursuit_controller/
+#   config/
+#     camera.yaml
+#     tags.yaml
+#     planner.yaml
+#     controller.yaml
+#   launch/
+#     demo_turtlesim.launch.py
+#     record.launch.py
+#   test/
+#     ekf2d_test.cpp
+#     planner_test.cpp
+#   .github/workflows/ci.yaml
+#   .devcontainer/devcontainer.json   # optional
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Top‑level CMakeLists.txt (meta)
+# ─────────────────────────────────────────────────────────────────────────────
+cmake_minimum_required(VERSION 3.16)
+project(phonefusion_nav)
+
+# Let colcon find sub‑packages in src/
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Nothing to build here; each package has its own CMakeLists
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/phone_imu_bridge/package.xml
+# ─────────────────────────────────────────────────────────────────────────────
+<?xml version="1.0"?>
+<package format="3">
+  <name>phone_imu_bridge</name>
+  <version>0.0.1</version>
+  <description>UDP→ROS2 bridge for smartphone IMU (sensor_msgs/Imu)</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>builtin_interfaces</depend>
+</package>
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/phone_imu_bridge/CMakeLists.txt
+# ─────────────────────────────────────────────────────────────────────────────
+cmake_minimum_required(VERSION 3.16)
+project(phone_imu_bridge)
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+
+add_executable(imu_bridge src/main.cpp)
+ament_target_dependencies(imu_bridge rclcpp sensor_msgs)
+
+install(TARGETS imu_bridge DESTINATION lib/${PROJECT_NAME})
+
+ament_package()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/phone_imu_bridge/src/main.cpp  (UDP JSON → /imu/data)
+# ─────────────────────────────────────────────────────────────────────────────
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <string>
+#include <cstring>
+#include <chrono>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+class ImuBridge : public rclcpp::Node {
+public:
+  ImuBridge(): Node("phone_imu_bridge") {
+    port_ = this->declare_parameter<int>("port", 5555);
+    frame_id_ = this->declare_parameter<std::string>("frame_id", "base_link");
+    sock_ = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_addr.s_addr = INADDR_ANY; addr.sin_port = htons(port_);
+    if (bind(sock_, (struct sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); exit(1);}    
+    pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/imu/data", 10);
+    timer_ = this->create_wall_timer(std::chrono::milliseconds(1), std::bind(&ImuBridge::spinOnce, this));
+  }
+  ~ImuBridge(){ if(sock_>=0) close(sock_); }
+private:
+  void spinOnce(){
+    char buf[2048]; sockaddr_in src{}; socklen_t slen = sizeof(src);
+    int n = recvfrom(sock_, buf, sizeof(buf)-1, MSG_DONTWAIT, (struct sockaddr*)&src, &slen);
+    if(n <= 0) return; buf[n] = '\0';
+    try{
+      auto j = json::parse(buf);
+      auto msg = sensor_msgs::msg::Imu();
+      msg.header.stamp = this->get_clock()->now();
+      msg.header.frame_id = frame_id_;
+      // expected JSON keys: ax, ay, az (m/s^2); gx, gy, gz (rad/s); qx,qy,qz,qw optional
+      msg.linear_acceleration.x = j.value("ax", 0.0);
+      msg.linear_acceleration.y = j.value("ay", 0.0);
+      msg.linear_acceleration.z = j.value("az", 0.0);
+      msg.angular_velocity.x = j.value("gx", 0.0);
+      msg.angular_velocity.y = j.value("gy", 0.0);
+      msg.angular_velocity.z = j.value("gz", 0.0);
+      if(j.contains("qx")){
+        msg.orientation.x = j.value("qx",0.0);
+        msg.orientation.y = j.value("qy",0.0);
+        msg.orientation.z = j.value("qz",0.0);
+        msg.orientation.w = j.value("qw",1.0);
+      }
+      pub_->publish(msg);
+    }catch(const std::exception& e){ RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "IMU parse error: %s", e.what()); }
+  }
+  int sock_{-1}; int port_; std::string frame_id_;
+  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_;
+  rclcpp::TimerBase::SharedPtr timer_;
+};
+
+int main(int argc, char** argv){ rclcpp::init(argc, argv); rclcpp::spin(std::make_shared<ImuBridge>()); rclcpp::shutdown(); return 0; }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/phone_cam_bridge/package.xml
+# ─────────────────────────────────────────────────────────────────────────────
+<?xml version="1.0"?>
+<package format="3">
+  <name>phone_cam_bridge</name>
+  <version>0.0.1</version>
+  <description>RTSP/HTTP camera → ROS Image bridge</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>image_transport</depend>
+  <depend>cv_bridge</depend>
+  <depend>camera_info_manager</depend>
+  <exec_depend>opencv</exec_depend>
+</package>
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/phone_cam_bridge/CMakeLists.txt
+# ─────────────────────────────────────────────────────────────────────────────
+cmake_minimum_required(VERSION 3.16)
+project(phone_cam_bridge)
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(image_transport REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(camera_info_manager REQUIRED)
+find_package(OpenCV REQUIRED)
+
+add_executable(cam_bridge src/main.cpp)
+ament_target_dependencies(cam_bridge rclcpp sensor_msgs image_transport cv_bridge camera_info_manager)
+
+target_link_libraries(cam_bridge ${OpenCV_LIBS})
+
+install(TARGETS cam_bridge DESTINATION lib/${PROJECT_NAME})
+
+ament_package()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/phone_cam_bridge/src/main.cpp  (OpenCV VideoCapture → /camera/image_raw)
+# ─────────────────────────────────────────────────────────────────────────────
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
+#include <image_transport/image_transport.hpp>
+#include <cv_bridge/cv_bridge.h>
+#include <camera_info_manager/camera_info_manager.hpp>
+#include <opencv2/opencv.hpp>
+using namespace std::chrono_literals;
+
+class CamBridge : public rclcpp::Node {
+public:
+  CamBridge() : Node("phone_cam_bridge"), it_(this) {
+    url_ = declare_parameter<std::string>("url", "");
+    frame_id_ = declare_parameter<std::string>("frame_id", "camera_frame");
+    cam_info_url_ = declare_parameter<std::string>("camera_info_url", "");
+    fps_ = declare_parameter<int>("fps", 15);
+    cinfo_ = std::make_unique<camera_info_manager::CameraInfoManager>(this, "phone_cam", cam_info_url_);
+    pub_ = it_.advertise("/camera/image_raw", 1);
+    info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("/camera/camera_info", 10);
+
+    if(!cap_.open(url_)) RCLCPP_FATAL(get_logger(), "Failed to open video: %s", url_.c_str());
+    timer_ = this->create_wall_timer( std::chrono::milliseconds(1000/std::max(1,fps_)), std::bind(&CamBridge::grab, this));
+  }
+private:
+  void grab(){
+    cv::Mat frame; if(!cap_.read(frame)) return;
+    auto msg = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", frame).toImageMsg();
+    msg->header.stamp = this->get_clock()->now();
+    msg->header.frame_id = frame_id_;
+    pub_.publish(msg);
+    auto ci = cinfo_->getCameraInfo(); ci.header = msg->header; info_pub_->publish(ci);
+  }
+  std::string url_, frame_id_, cam_info_url_; int fps_;
+  image_transport::ImageTransport it_; image_transport::Publisher pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr info_pub_;
+  cv::VideoCapture cap_; rclcpp::TimerBase::SharedPtr timer_;
+};
+
+int main(int argc, char** argv){ rclcpp::init(argc, argv); rclcpp::spin(std::make_shared<CamBridge>()); rclcpp::shutdown(); return 0; }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/apriltag_pose/package.xml
+# ─────────────────────────────────────────────────────────────────────────────
+<?xml version="1.0"?>
+<package format="3">
+  <name>apriltag_pose</name>
+  <version>0.0.1</version>
+  <description>AprilTag detection and camera→tag pose</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>cv_bridge</depend>
+  <exec_depend>opencv</exec_depend>
+</package>
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/apriltag_pose/CMakeLists.txt  (expects system apriltag library)
+# ─────────────────────────────────────────────────────────────────────────────
+cmake_minimum_required(VERSION 3.16)
+project(apriltag_pose)
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(OpenCV REQUIRED)
+
+# link against apriltag if available
+find_library(APRILTAG_LIB apriltag)
+
+add_executable(apriltag_node src/main.cpp)
+ament_target_dependencies(apriltag_node rclcpp sensor_msgs geometry_msgs tf2 tf2_ros cv_bridge)
+if(APRILTAG_LIB)
+  target_link_libraries(apriltag_node ${APRILTAG_LIB} ${OpenCV_LIBS})
+endif()
+
+install(TARGETS apriltag_node DESTINATION lib/${PROJECT_NAME})
+
+ament_package()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/apriltag_pose/src/main.cpp  (stub: wire image→poses; fill detection later)
+# ─────────────────────────────────────────────────────────────────────────────
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include <cv_bridge/cv_bridge.h>
+#include <tf2_ros/static_transform_broadcaster.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <opencv2/opencv.hpp>
+
+class TagPose : public rclcpp::Node {
+public:
+  TagPose(): Node("apriltag_pose"){
+    image_sub_ = this->create_subscription<sensor_msgs::msg::Image>("/camera/image_raw", 10,
+      std::bind(&TagPose::cb, this, std::placeholders::_1));
+    pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/vision/pose", 10);
+    // TODO: add detection + tag map param
+  }
+private:
+  void cb(const sensor_msgs::msg::Image::ConstSharedPtr msg){
+    // TODO: detect tag, solvePnP using camera intrinsics for pose
+    // For now publish a dummy pose at origin with large covariance to validate wiring
+    geometry_msgs::msg::PoseWithCovarianceStamped p{};
+    p.header = msg->header; p.header.frame_id = "map";
+    p.pose.pose.orientation.w = 1.0;
+    for(int i=0;i<36;++i) p.pose.covariance[i] = (i%7==0)? 1e3 : 0.0;
+    pose_pub_->publish(p);
+  }
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_pub_;
+};
+
+int main(int argc,char**argv){ rclcpp::init(argc,argv); rclcpp::spin(std::make_shared<TagPose>()); rclcpp::shutdown(); return 0; }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/ekf2d/package.xml
+# ─────────────────────────────────────────────────────────────────────────────
+<?xml version="1.0"?>
+<package format="3">
+  <name>ekf2d</name>
+  <version>0.0.1</version>
+  <description>Minimal 2D EKF (x,y,yaw) fusing IMU yaw-rate + visual pose</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>Eigen3</depend>
+</package>
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/ekf2d/CMakeLists.txt
+# ─────────────────────────────────────────────────────────────────────────────
+cmake_minimum_required(VERSION 3.16)
+project(ekf2d)
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(Eigen3 REQUIRED)
+
+add_executable(ekf2d_node src/main.cpp)
+ament_target_dependencies(ekf2d_node rclcpp geometry_msgs sensor_msgs nav_msgs tf2 tf2_ros)
+
+target_link_libraries(ekf2d_node Eigen3::Eigen)
+
+install(TARGETS ekf2d_node DESTINATION lib/${PROJECT_NAME})
+
+ament_package()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/ekf2d/src/main.cpp  (3‑state EKF skeleton)
+# ─────────────────────────────────────────────────────────────────────────────
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <tf2_ros/transform_broadcaster.h>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <Eigen/Dense>
+using namespace std::chrono_literals;
+
+class EKF2D : public rclcpp::Node {
+public:
+  EKF2D(): Node("ekf2d"){
+    x_.setZero(); P_.setIdentity(); P_ *= 1.0; Q_.setZero(); R_.setZero();
+    Q_.diagonal() << 1e-3, 1e-3, 1e-3;    // tune
+    R_.diagonal() << 1e-2, 1e-2, 1e-2;    // tune
+    imu_sub_ = create_subscription<sensor_msgs::msg::Imu>("/imu/data", 50, std::bind(&EKF2D::imuCb, this, std::placeholders::_1));
+    vis_sub_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>("/vision/pose", 10, std::bind(&EKF2D::visCb, this, std::placeholders::_1));
+    odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    tfb_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+    last_t_ = now();
+  }
+private:
+  void imuCb(const sensor_msgs::msg::Imu::ConstSharedPtr m){
+    auto t = m->header.stamp; if(t.nanoseconds() == 0) t = now();
+    double dt = (t - last_t_).seconds(); if(dt <= 0 || dt > 0.2) dt = 0.01;
+    last_t_ = t;
+    double yawrate = m->angular_velocity.z;
+    // state: [x y yaw]
+    double c = std::cos(x_(2)), s = std::sin(x_(2));
+    // simple constant‑speed model (vx from accel projection is optional; keep zero for MVP)
+    Eigen::Vector3d f; f << 0.0, 0.0, yawrate*dt; // integrate yaw only for drift demo
+    x_ += f; normalizeYaw();
+    // Jacobian F (identity with yaw coupling negligible for MVP)
+    Eigen::Matrix3d F = Eigen::Matrix3d::Identity();
+    P_ = F*P_*F.transpose() + Q_;
+    publishOdom(t);
+  }
+  void visCb(const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr z){
+    // extract planar (x,y,yaw) from visual pose (assume z in map frame)
+    double x = 0.0, y = 0.0, yaw = 0.0; // TODO: compute from quaternion
+    Eigen::Vector3d h; h << x, y, yaw;
+    Eigen::Matrix3d H = Eigen::Matrix3d::Identity();
+    Eigen::Vector3d yk = h - x_;
+    Eigen::Matrix3d S = H*P_*H.transpose() + R_;
+    Eigen::Matrix3d K = P_*H.transpose()*S.inverse();
+    x_ = x_ + K*yk; P_ = (Eigen::Matrix3d::Identity() - K*H)*P_;
+    normalizeYaw();
+    publishOdom(z->header.stamp);
+  }
+  void publishOdom(const rclcpp::Time& t){
+    nav_msgs::msg::Odometry o; o.header.stamp = t; o.header.frame_id = "odom"; o.child_frame_id = "base_link";
+    o.pose.pose.position.x = x_(0); o.pose.pose.position.y = x_(1);
+    double cy = std::cos(x_(2)*0.5), sy = std::sin(x_(2)*0.5);
+    o.pose.pose.orientation.z = sy; o.pose.pose.orientation.w = cy; // yaw‑only quaternion
+    odom_pub_->publish(o);
+    geometry_msgs::msg::TransformStamped tf; tf.header = o.header; tf.child_frame_id = o.child_frame_id;
+    tf.transform.translation.x = o.pose.pose.position.x; tf.transform.translation.y = o.pose.pose.position.y;
+    tf.transform.rotation = o.pose.pose.orientation; tfb_->sendTransform(tf);
+  }
+  void normalizeYaw(){ while(x_(2) > M_PI) x_(2) -= 2*M_PI; while(x_(2) < -M_PI) x_(2) += 2*M_PI; }
+  Eigen::Vector3d x_; Eigen::Matrix3d P_, Q_, R_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr vis_sub_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tfb_;
+  rclcpp::Time last_t_;
+};
+
+int main(int argc,char**argv){ rclcpp::init(argc,argv); rclcpp::spin(std::make_shared<EKF2D>()); rclcpp::shutdown(); return 0; }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/tiny_planner/package.xml
+# ─────────────────────────────────────────────────────────────────────────────
+<?xml version="1.0"?>
+<package format="3">
+  <name>tiny_planner</name>
+  <version>0.0.1</version>
+  <description>Minimal A* 2D planner publishing nav_msgs/Path</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+</package>
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/tiny_planner/CMakeLists.txt
+# ─────────────────────────────────────────────────────────────────────────────
+cmake_minimum_required(VERSION 3.16)
+project(tiny_planner)
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+
+add_executable(tiny_planner_node src/main.cpp)
+ament_target_dependencies(tiny_planner_node rclcpp nav_msgs geometry_msgs)
+
+install(TARGETS tiny_planner_node DESTINATION lib/${PROJECT_NAME})
+
+ament_package()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/tiny_planner/src/main.cpp  (stub: publishes straight‑line Path)
+# ─────────────────────────────────────────────────────────────────────────────
+#include <rclcpp/rclcpp.hpp>
+#include <nav_msgs/msg/path.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+
+class TinyPlanner : public rclcpp::Node{
+public:
+  TinyPlanner(): Node("tiny_planner"){
+    goal_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>("/goal", 10, std::bind(&TinyPlanner::goalCb, this, std::placeholders::_1));
+    path_pub_ = create_publisher<nav_msgs::msg::Path>("/plan", 10);
+  }
+private:
+  void goalCb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr g){
+    nav_msgs::msg::Path p; p.header = g->header; p.header.frame_id = "odom";
+    // Straight‑line discretization (MVP)
+    for(int i=0;i<=50;++i){
+      geometry_msgs::msg::PoseStamped ps; ps.header = p.header; double a = i/50.0; ps.pose.position.x = a*g->pose.position.x; ps.pose.position.y = a*g->pose.position.y; ps.pose.orientation.w = 1.0; p.poses.push_back(ps);
+    }
+    path_pub_->publish(p);
+  }
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
+};
+
+int main(int argc,char**argv){ rclcpp::init(argc,argv); rclcpp::spin(std::make_shared<TinyPlanner>()); rclcpp::shutdown(); return 0; }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/pure_pursuit_controller/package.xml
+# ─────────────────────────────────────────────────────────────────────────────
+<?xml version="1.0"?>
+<package format="3">
+  <name>pure_pursuit_controller</name>
+  <version>0.0.1</version>
+  <description>Pure pursuit controller for /plan → /cmd_vel</description>
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
+</package>
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/pure_pursuit_controller/CMakeLists.txt
+# ─────────────────────────────────────────────────────────────────────────────
+cmake_minimum_required(VERSION 3.16)
+project(pure_pursuit_controller)
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+
+add_executable(pure_pursuit_node src/main.cpp)
+ament_target_dependencies(pure_pursuit_node rclcpp nav_msgs geometry_msgs)
+
+install(TARGETS pure_pursuit_node DESTINATION lib/${PROJECT_NAME})
+
+ament_package()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# src/pure_pursuit_controller/src/main.cpp  (TurtleSim‑friendly /cmd_vel)
+# ─────────────────────────────────────────────────────────────────────────────
+#include <rclcpp/rclcpp.hpp>
+#include <nav_msgs/msg/path.hpp>
+#include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+
+class PurePursuit : public rclcpp::Node{
+public:
+  PurePursuit(): Node("pure_pursuit"){
+    plan_sub_ = create_subscription<nav_msgs::msg::Path>("/plan", 10, std::bind(&PurePursuit::planCb, this, std::placeholders::_1));
+    cmd_pub_  = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+    lookahead_ = declare_parameter<double>("lookahead", 0.5);
+    v_ = declare_parameter<double>("v", 0.8);
+  }
+private:
+  void planCb(const nav_msgs::msg::Path::ConstSharedPtr p){
+    if(p->poses.empty()) return;
+    // pick a lookahead point (last for MVP)
+    auto goal = p->poses.back().pose.position;
+    // very simple P controller toward goal (TurtleSim tolerates this)
+    double dx = goal.x - x_, dy = goal.y - y_;
+    double ang = std::atan2(dy, dx); double err = ang - yaw_;
+    geometry_msgs::msg::Twist cmd; cmd.linear.x = v_; cmd.angular.z = 1.5*err; cmd_pub_->publish(cmd);
+  }
+  // TODO: subscribe to odom to fill x_,y_,yaw_
+  double x_{0}, y_{0}, yaw_{0}, lookahead_{0.5}, v_{0.8};
+  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr plan_sub_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
+};
+
+int main(int argc,char**argv){ rclcpp::init(argc,argv); rclcpp::spin(std::make_shared<PurePursuit>()); rclcpp::shutdown(); return 0; }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# config/camera.yaml (placeholder; replace with real calibration)
+# ─────────────────────────────────────────────────────────────────────────────
+image_width: 1920
+image_height: 1080
+camera_name: phone_cam
+camera_matrix: {rows: 3, cols: 3, data: [1000,0,960, 0,1000,540, 0,0,1]}
+distortion_model: plumb_bob
+distortion_coefficients: {rows: 1, cols: 5, data: [0,0,0,0,0]}
+rectification_matrix: {rows: 3, cols: 3, data: [1,0,0, 0,1,0, 0,0,1]}
+projection_matrix: {rows: 3, cols: 4, data: [1000,0,960,0, 0,1000,540,0, 0,0,1,0]}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# config/tags.yaml (ID→pose in map; fill real values)
+# ─────────────────────────────────────────────────────────────────────────────
+# tag_id: [x, y, z, yaw_deg]
+0: [0.0, 0.0, 0.0, 0.0]
+1: [1.0, 0.0, 0.0, 0.0]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# config/planner.yaml (grid and limits; unused in MVP straight‑line)
+# ─────────────────────────────────────────────────────────────────────────────
+resolution: 0.05
+width: 200
+height: 200
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# config/controller.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+lookahead: 0.6
+v: 0.8
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# launch/demo_turtlesim.launch.py
+# ─────────────────────────────────────────────────────────────────────────────
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(package='turtlesim', executable='turtlesim_node', name='turtlesim'),
+        Node(package='phone_imu_bridge', executable='imu_bridge', name='imu_bridge', parameters=[{'port':5555,'frame_id':'base_link'}]),
+        Node(package='phone_cam_bridge', executable='cam_bridge', name='cam_bridge', parameters=[{'url':'http://<PHONE_IP>:8080/video','camera_info_url':'file://$(find-pkg-share phone_cam_bridge)/../../config/camera.yaml'}]),
+        Node(package='apriltag_pose', executable='apriltag_node', name='apriltag_node'),
+        Node(package='ekf2d', executable='ekf2d_node', name='ekf2d'),
+        Node(package='tiny_planner', executable='tiny_planner_node', name='tiny_planner'),
+        Node(package='pure_pursuit_controller', executable='pure_pursuit_node', name='pure_pursuit', parameters=['$(find-pkg-share pure_pursuit_controller)/../../config/controller.yaml']),
+    ])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# launch/record.launch.py  (records a quick bag)
+# ─────────────────────────────────────────────────────────────────────────────
+from launch import LaunchDescription
+from launch.actions import ExecuteProcess
+
+def generate_launch_description():
+    return LaunchDescription([
+        ExecuteProcess(cmd=['ros2','bag','record','-o','bags/mvp',
+                             '/imu/data','/camera/image_raw','/vision/pose','/odom','/plan','/cmd_vel'])
+    ])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test/ekf2d_test.cpp (placeholder unit test)
+# ─────────────────────────────────────────────────────────────────────────────
+#include <gtest/gtest.h>
+TEST(EKF2D, Placeholder){ EXPECT_EQ(1,1); }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# test/planner_test.cpp (placeholder unit test)
+# ─────────────────────────────────────────────────────────────────────────────
+#include <gtest/gtest.h>
+TEST(Planner, Placeholder){ EXPECT_TRUE(true); }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# .github/workflows/ci.yaml (build + test)
+# ─────────────────────────────────────────────────────────────────────────────
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup ROS 2 Humble
+        uses: ros-tooling/setup-ros@v0.7
+        with:
+          required-ros-distributions: humble
+      - name: Build
+        uses: ros-tooling/action-ros-ci@v0.3
+        with:
+          target-ros2-distro: humble
+          package-name: |
+            phone_imu_bridge
+            phone_cam_bridge
+            apriltag_pose
+            ekf2d
+            tiny_planner
+            pure_pursuit_controller
+          colcon-mixin-name: default
+          colcon-defaults: '{"build":{"cmake-args":["-DCMAKE_BUILD_TYPE=Release"]}}'
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# README.md (quick start — fill your details and video later)
+# ─────────────────────────────────────────────────────────────────────────────
+# PhoneFusion‑Nav (ROS 2 Humble, C++)
+A compact ROS 2 project that turns a smartphone into a sensor head (camera + IMU), fuses data in C++ to produce `/odom`, plans a path, and drives a robot (TurtleSim) end‑to‑end.
+
+### Quick Start
+```bash
+sudo apt update && sudo apt install -y ros-humble-desktop-full libeigen3-dev libapriltag-dev
+mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
+# drop this repo here -> phonefusion_nav/
+colcon build --symlink-install && source ~/ros2_ws/install/setup.bash
+ros2 launch phonefusion_nav demo_turtlesim.launch.py
+```
+
+**Phone setup:** use any IP Webcam app (HTTP video at `http://PHONE_IP:8080/video`) and an IMU UDP streamer sending JSON `{ax,ay,az,gx,gy,gz}` to your PC at port `5555`.
+
+**Topics:** `/imu/data`, `/camera/image_raw`, `/vision/pose`, `/odom`, `/plan`, `/cmd_vel`.
+
+**Demo:** open RViz, add TF + Odometry + Image; publish a `/goal` pose (or adapt `tiny_planner` to a fixed goal). TurtleSim should move.
+
+### Notes
+- `apriltag_pose` is stubbed—add detection (OpenCV + apriltag) and fill `tags.yaml`.
+- `ekf2d` fuses yaw‑rate + visual pose in 2D for speed. Extend later to 15‑state VIO.
+- Replace placeholder tests with real ones.
+
+### License
+MIT
