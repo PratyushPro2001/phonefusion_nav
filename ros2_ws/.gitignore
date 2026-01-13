@@ -1,0 +1,26 @@
+
+# ROS2 build artifacts
+/build/
+/install/
+/log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Bags / large data (add your own patterns)
+*.bag
+*.db3
+*.mcap
+*.pcap
+*.pcapng
