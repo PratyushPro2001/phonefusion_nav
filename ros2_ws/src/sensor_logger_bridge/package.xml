@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>sensor_logger_bridge</name>
+  <version>0.1.0</version>
+  <description>HTTP-push receiver for the Sensor Logger iOS/Android app. Publishes IMU, GPS, magnetometer and barometer topics with phone timestamps.</description>
+  <maintainer email="wecarevts@gmail.com">PhoneFusion-Nav</maintainer>
+  <license>MIT</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
