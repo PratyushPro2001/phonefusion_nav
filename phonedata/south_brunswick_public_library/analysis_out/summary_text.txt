@@ -1,0 +1,60 @@
+Accelerometer  [m/s^2]  184204 samples, 30.7 min, ~99.9 Hz, dt jitter 0.00 ms, max gap 10 ms
+   x: mean +0.000177   std 0.008187   var (R start) 6.703e-05   p2p 0.72018
+   y: mean -0.001542   std 0.007254   var (R start) 5.262e-05   p2p 0.35457
+   z: mean +0.020690   std 0.007570   var (R start) 5.730e-05   p2p 0.16350
+   |a| mean 0.02332 (expect 1.00000, g (units look like g, not m/s^2!)); gravity on axis 'z', bias there ~ -0.97931
+
+AccelerometerUncalibrated  [m/s^2]  184205 samples, 30.7 min, ~99.9 Hz, dt jitter 0.00 ms, maxgap 10 ms
+   x: mean +0.014228   std 0.000841   var (R start) 7.080e-07   p2p 0.07393
+   y: mean +0.004364   std 0.000742   var (R start) 5.500e-07   p2p 0.03575
+   z: mean -0.997779   std 0.000772   var (R start) 5.967e-07   p2p 0.01668
+   |a| mean 0.99789 (expect 1.00000, g (units look like g, not m/s^2!)); gravity on axis 'z', bias there ~ +0.00222
+
+Gyroscope  [rad/s]  184204 samples, 30.7 min, ~99.9 Hz, dt jitter 0.00 ms, max gap 10 ms
+   x: mean -0.000011   std 0.000706   var (R start) 4.988e-07   p2p 0.01712
+   y: mean -0.000005   std 0.000684   var (R start) 4.684e-07   p2p 0.02127
+   z: mean +0.000003   std 0.000751   var (R start) 5.646e-07   p2p 0.01209
+
+GyroscopeUncalibrated  [rad/s]  184205 samples, 30.7 min, ~99.9 Hz, dt jitter 0.00 ms, max gap10 ms
+   x: mean +0.002530   std 0.000705   var (R start) 4.965e-07   p2p 0.01470
+   y: mean +0.002679   std 0.000684   var (R start) 4.684e-07   p2p 0.02301
+   z: mean +0.000744   std 0.000742   var (R start) 5.509e-07   p2p 0.01303
+
+Magnetometer  [uT]  184204 samples, 30.7 min, ~99.9 Hz, dt jitter 0.00 ms, max gap 10 ms
+   x: mean +24.734437   std 0.803822   var (R start) 6.461e-01   p2p 4.47412
+   y: mean -24.714763   std 0.239880   var (R start) 5.754e-02   p2p 2.07211
+   z: mean -73.499525   std 0.408614   var (R start) 1.670e-01   p2p 2.96042
+
+MagnetometerUncalibrated  [uT]  177499 samples, 30.7 min, ~96.3 Hz, dt jitter 0.00 ms, max gap10 ms
+   x: mean -176.673666   std 0.803591   var (R start) 6.458e-01   p2p 4.63741
+   y: mean -10.421801   std 0.249658   var (R start) 6.233e-02   p2p 2.15607
+   z: mean -388.552201   std 0.467678   var (R start) 2.187e-01   p2p 3.38934
+
+Gravity  [m/s^2]  184204 samples, 30.7 min, ~99.9 Hz, dt jitter 0.00 ms, max gap 10 ms
+   x: mean +0.139355   std 0.002508   var (R start) 6.292e-06   p2p 0.02099
+   y: mean +0.044338   std 0.002917   var (R start) 8.511e-06   p2p 0.01726
+   z: mean -9.805559   std 0.000031   var (R start) 9.365e-10   p2p 0.00025
+   |a| mean 9.80665 (expect 9.80665, m/s^2); gravity on axis 'z', bias there ~ +0.00109
+
+Allan deviation (white-noise level at tau~1 s, and minimum = bias-instability scale):
+   Accelerometer               x: sigma(1s) 7.856e-04   min 5.241e-04 at tau 95.5s  (m/s^2)
+   Accelerometer               y: sigma(1s) 8.165e-04   min 5.361e-04 at tau 158.8s  (m/s^2)
+   Accelerometer               z: sigma(1s) 7.849e-04   min 3.372e-04 at tau 7.5s  (m/s^2)
+   AccelerometerUncalibrated   x: sigma(1s) 6.654e-05   min 2.967e-05 at tau 12.5s  (m/s^2)
+   AccelerometerUncalibrated   y: sigma(1s) 6.949e-05   min 2.991e-05 at tau 9.7s  (m/s^2)
+   AccelerometerUncalibrated   z: sigma(1s) 8.003e-05   min 3.444e-05 at tau 7.5s  (m/s^2)
+   Gyroscope                   x: sigma(1s) 8.667e-05   min 5.747e-06 at tau 158.8s  (rad/s)
+   Gyroscope                   y: sigma(1s) 8.094e-05   min 3.508e-06 at tau 204.8s  (rad/s)
+   Gyroscope                   z: sigma(1s) 9.649e-05   min 5.605e-06 at tau 204.8s  (rad/s)
+   GyroscopeUncalibrated       x: sigma(1s) 7.024e-05   min 1.986e-05 at tau 34.5s  (rad/s)
+   GyroscopeUncalibrated       y: sigma(1s) 6.446e-05   min 1.448e-05 at tau 34.5s  (rad/s)
+   GyroscopeUncalibrated       z: sigma(1s) 7.400e-05   min 7.725e-06 at tau 123.1s  (rad/s)
+
+Orientation (assuming radians, shown in degrees):
+   roll: mean +0.8142  std 0.01466  p2p 0.1226 deg
+   pitch: mean -0.2590  std 0.01705  p2p 0.1008 deg
+   yaw: mean +88.5063  std 0.07444  p2p 0.3641 deg
+
+Barometer: pressure mean 1029.277  std 0.1327 (hPa)
+
+GPS at rest (1859 fixes): north std 6.57 m, east std 1.75 m -> GPS R starts near 43.23 m^2

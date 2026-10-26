@@ -20,3 +20,8 @@ __pycache__/
 
 # Temp
 *.swp
+
+# raw sensor exports and captures (keep scripts, plots and small samples)
+phonedata/*.zip
+phonedata/*/*.csv
+captures/

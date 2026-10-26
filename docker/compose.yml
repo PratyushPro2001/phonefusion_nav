@@ -1,0 +1,15 @@
+# From the project root:  docker compose -f docker/compose.yml run --rm --service-ports ros
+services:
+  ros:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: phonefusion-nav:humble
+    working_dir: /ws
+    volumes:
+      - ..:/ws            # project folder <-> container (edits sync both ways)
+    ports:
+      - "8000:8000"       # Sensor Logger HTTP push  (phone -> http://<mac-ip>:8000/data)
+      - "8765:8765"       # Foxglove websocket       (Foxglove -> ws://localhost:8765)
+    stdin_open: true
+    tty: true
